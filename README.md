@@ -1,6 +1,6 @@
 # tinytcp64
 
-x86-64 FreeBSD/Linux TCP server in assembly
+x86-64 TCP server written in assembly for FreeBSD and Linux
 
 To build: `sh ./build.sh`
 
