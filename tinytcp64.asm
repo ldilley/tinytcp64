@@ -1,7 +1,7 @@
 [BITS 64]
 
 ; tinytcp64.asm - 64-bit Linux TCP server
-; Copyright (C) 2014, 2016 Lloyd Dilley
+; Copyright (C) 2014-2021 Lloyd Dilley
 ; http://www.dilley.me/
 ;
 ; This program is free software; you can redistribute it and/or modify
@@ -19,6 +19,26 @@
 ; 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 ; Creation date: 04/02/2014
+; Ported to FreeBSD on 12/28/2021
+
+%include "config.inc"
+%ifdef LINUX
+%define SOCKET_CALL 41
+%define BIND_CALL 49
+%define LISTEN_CALL 50
+%define ACCEPT_CALL 43
+%define CLOSE_CALL 3
+%define WRITE_CALL 1
+%define EXIT_CALL 60
+%else
+%define SOCKET_CALL 97
+%define BIND_CALL 104
+%define LISTEN_CALL 106
+%define ACCEPT_CALL 30
+%define CLOSE_CALL 6
+%define WRITE_CALL 4
+%define EXIT_CALL 1
+%endif
 
 struc sockaddr_in
   .sin_family resw 1
@@ -51,16 +71,17 @@ section .data
       ; TCP port 9990 (network byte order)
       at sockaddr_in.sin_port, dw 0x0627
       ; 127.0.0.1 (network byte order)
-      at sockaddr_in.sin_address, dd 0x0100007F
+      ;at sockaddr_in.sin_address, dd 0x0100007F
+      at sockaddr_in.sin_address, dd 0x00000000  ; all interfaces
       at sockaddr_in.sin_zero, dq 0
     iend
 
 section .text
 global _start
 _start:
-  ; Get a file descriptor for sys_bind
-  mov rax, 41           ; sys_socket
-  mov rdi, 2            ; AF_INET
+  ; Get a file descriptor for binding
+  mov rax, SOCKET_CALL
+  mov rdi, 2            ; AF_INET/PF_INET (AF = Address Family/PF = Protocol Family)
   mov rsi, 1            ; SOCK_STREAM
   mov rdx, 0            ; protocol
   syscall
@@ -70,8 +91,8 @@ _start:
   js exit_error
 
   ; Bind to a socket
-  mov rax, 49           ; sys_bind
-  pop rdi               ; file descriptor from sys_socket
+  mov rax, BIND_CALL
+  pop rdi               ; file descriptor from SOCKET_CALL
   mov rbx, rdi          ; preserve server fd (rbx is saved across calls)
   mov rsi, sockaddr
   mov rdx, 16           ; size of sin_address is 16 bytes (64-bit address)
@@ -81,7 +102,7 @@ _start:
   js exit_error
 
   ; Listen for connections
-  mov rax, 50           ; sys_listen
+  mov rax, LISTEN_CALL
   mov rdi, rbx          ; fd
   mov rsi, 10           ; backlog
   syscall
@@ -89,7 +110,7 @@ _start:
   test rax, rax
   js exit_error
   ; Notify user that we're ready to listen for incoming connections
-  mov rax, 1            ; sys_write
+  mov rax, WRITE_CALL
   mov rdi, 1            ; file descriptor (1 is stdout)
   mov rsi, waiting
   mov rdx, waiting_len
@@ -98,7 +119,7 @@ _start:
 
 accept:
   ; Accept connections
-  mov rax, 43           ; sys_accept
+  mov rax, ACCEPT_CALL
   mov rdi, rbx          ; fd
   mov rsi, peeraddr
   lea rdx, [addr_len]
@@ -108,7 +129,7 @@ accept:
   js exit_error
 
   ; Send data
-  mov rax, 1
+  mov rax, WRITE_CALL
   pop rdi               ; peer fd
   mov r15, rdi          ; preserve peer fd (r15 is saved across calls)
   mov rsi, greeting
@@ -119,7 +140,7 @@ accept:
   js exit_error
 
   ; Close peer socket
-  mov rax, 3            ; sys_close
+  mov rax, CLOSE_CALL
   mov rdi, r15          ; fd
   syscall
   push rax
@@ -130,7 +151,7 @@ accept:
 
 shutdown:
   ; Close server socket
-  mov rax, 3
+  mov rax, CLOSE_CALL
   mov rdi, rbx
   syscall
   push rax
@@ -138,17 +159,17 @@ shutdown:
   js exit_error
 
   ; Exit normally
-  mov rax, 60           ; sys_exit
+  mov rax, EXIT_CALL
   xor rdi, rdi          ; return code 0
   syscall
 
 exit_error:
-  mov rax, 1
+  mov rax, WRITE_CALL
   mov rdi, 1
   mov rsi, error
   mov rdx, error_len
   syscall
 
-  mov rax, 60
+  mov rax, EXIT_CALL
   pop rdi               ; stored error code
   syscall
